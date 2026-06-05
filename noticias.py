@@ -157,24 +157,20 @@ async def disparar_noticias(bot, periodo_label=""):
 
     for chat_id in IDS_AUTORIZADOS:
         try:
-            # Envia cabeçalho com imagem
+            total_novas = len(novas)
+            caption = f"\U0001f3e0 *Noticias do Mercado Imobiliario*\n_{periodo_label}_ — {total_novas} nova(s)"
             await bot.send_photo(
                 chat_id=chat_id,
                 photo=IMAGEM_NOTICIAS,
-                caption=(
-                    f"🏠 *Notícias do Mercado Imobiliário*
-"
-                    f"_{periodo_label}_ — {len(novas)} nova(s)"
-                ),
+                caption=caption,
                 parse_mode="Markdown"
             )
-            # Envia cada notícia
             for i, n in enumerate(novas, 1):
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=formatar_noticia(n, i, len(novas)),
+                    text=formatar_noticia(n, i, total_novas),
                     parse_mode="Markdown",
                     disable_web_page_preview=True
                 )
         except Exception as e:
-            print(f"⚠️ {chat_id}: {e}")
+            print(f"aviso {chat_id}: {e}")
