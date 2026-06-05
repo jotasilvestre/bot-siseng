@@ -1,5 +1,5 @@
 # ============================================================
-# SISENG BOT — Módulo de Notícias via RSS
+# SISENG BOT — Módulo de Notícias via RSS (com fallback)
 # ============================================================
 
 import httpx
@@ -7,12 +7,10 @@ import xml.etree.ElementTree as ET
 import re
 from config import IDS_AUTORIZADOS
 
-# URLs para tentar em ordem
+# Usa o RSS2JSON como proxy — converte RSS em JSON sem bloqueio de IP
 RSS_URLS = [
-    "https://publicidadeimobiliaria.com/?feed=rss2",
-    "https://publicidadeimobiliaria.com/?feed=rss",
-    "https://publicidadeimobiliaria.com/feed/rss/",
-    "https://publicidadeimobiliaria.com/feed/",
+    "https://api.rss2json.com/v1/api.json?rss_url=https://publicidadeimobiliaria.com/feed/",
+    "https://api.rss2json.com/v1/api.json?rss_url=https://publicidadeimobiliaria.com/?feed=rss2",
 ]
 
 _ids_enviados = set()
@@ -20,70 +18,57 @@ _inicializado = False
 
 
 async def buscar_noticias():
-    """Tenta múltiplas URLs de RSS até encontrar XML válido."""
+    """Busca notícias via RSS2JSON (proxy gratuito)."""
     for url in RSS_URLS:
         try:
-            async with httpx.AsyncClient(
-                timeout=30,
-                follow_redirects=True,
-                headers={
-                    "User-Agent": "Feedfetcher-Google; (+http://www.google.com/feedfetcher.html)",
-                    "Accept": "application/rss+xml, application/xml, text/xml, */*",
-                    "Cache-Control": "no-cache"
-                }
-            ) as client:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
                 response = await client.get(url)
 
-            texto = response.text.strip()
-            print(f"📰 {url} → {response.status_code} | {response.headers.get('content-type','')[:30]}")
-
             if response.status_code != 200:
+                print(f"📰 RSS2JSON erro: {response.status_code}")
                 continue
 
-            if not ("<rss" in texto or "<?xml" in texto):
+            data = response.json()
+            status = data.get("status", "")
+            print(f"📰 RSS2JSON status: {status}")
+
+            if status != "ok":
+                print(f"📰 RSS2JSON falhou: {data.get('message','')}")
                 continue
 
-            # Tenta parsear
-            root = ET.fromstring(texto)
-            channel = root.find("channel")
-            if not channel:
-                continue
-
+            items = data.get("items", [])
             noticias = []
-            for item in channel.findall("item"):
-                titulo = item.findtext("title", "").strip()
-                link   = item.findtext("link",  "").strip()
-                data   = item.findtext("pubDate", "").strip()[:25]
-                desc   = item.findtext("description", "").strip()
+
+            for item in items:
+                titulo = item.get("title", "").strip()
+                link   = item.get("link",  "").strip()
+                data_pub = item.get("pubDate", "")[:10]
+                desc   = item.get("description", "")
+                categoria = item.get("categories", [""])[0] if item.get("categories") else ""
 
                 if not titulo or not link:
                     continue
 
                 desc_limpa = re.sub(r'<[^>]+>', '', desc)[:200].strip()
-                categoria  = ""
-                cat_el = item.find("category")
-                if cat_el is not None and cat_el.text:
-                    categoria = cat_el.text.strip()
-
                 slug = link.strip("/").split("/")[-1] or link
 
                 noticias.append({
                     "id":        slug,
                     "titulo":    titulo,
                     "link":      link,
-                    "data":      data,
+                    "data":      data_pub,
                     "categoria": categoria,
                     "resumo":    desc_limpa
                 })
 
-            print(f"📰 ✅ RSS funcionou! {len(noticias)} notícias de {url}")
+            print(f"📰 ✅ {len(noticias)} notícias encontradas!")
             return noticias
 
         except Exception as e:
-            print(f"📰 ⚠️ Falhou {url}: {e}")
+            print(f"📰 ⚠️ Erro: {e}")
             continue
 
-    print("📰 ❌ Nenhuma URL de RSS funcionou.")
+    print("📰 ❌ Nenhuma fonte funcionou.")
     return []
 
 
