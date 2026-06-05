@@ -404,11 +404,10 @@ async def cmd_testenoticias(update, context):
             return
         # Mostra só a primeira notícia como teste
         n = noticias[0]
+        total = len(noticias)
+        header = f"✅ *Teste de notícia — 1 de {total} encontradas*"
         await update.message.reply_text(
-            f"✅ *Teste de notícia — 1 de {len(noticias)} encontradas*
-
-"
-            + formatar_noticia(n, 1, len(noticias)),
+            header + "\n\n" + formatar_noticia(n, 1, total),
             parse_mode="Markdown",
             disable_web_page_preview=False
         )
