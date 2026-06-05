@@ -1,5 +1,5 @@
 # ============================================================
-# SISENG BOT — Módulo de Notícias via RSS (com fallback)
+# SISENG BOT — Módulo de Notícias via RSS direto
 # ============================================================
 
 import httpx
@@ -7,69 +7,117 @@ import xml.etree.ElementTree as ET
 import re
 from config import IDS_AUTORIZADOS
 
-# Usa o RSS2JSON como proxy — converte RSS em JSON sem bloqueio de IP
-RSS_URLS = [
-    "https://api.rss2json.com/v1/api.json?rss_url=https://publicidadeimobiliaria.com/feed/",
-    "https://api.rss2json.com/v1/api.json?rss_url=https://publicidadeimobiliaria.com/?feed=rss2",
-]
-
 _ids_enviados = set()
 _inicializado = False
 
+RSS_FEED = "https://publicidadeimobiliaria.com/feed/"
+
+HEADERS_LIST = [
+    {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
+    {
+        "User-Agent": "Feedly/1.0 (+http://www.feedly.com/fetcher.html)",
+        "Accept": "application/rss+xml, application/xml, text/xml",
+    },
+    {
+        "User-Agent": "python-httpx/0.27.0",
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    },
+]
+
 
 async def buscar_noticias():
-    """Busca notícias via RSS2JSON (proxy gratuito)."""
-    for url in RSS_URLS:
+    """Tenta diferentes User-Agents para buscar o RSS."""
+    for headers in HEADERS_LIST:
         try:
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                response = await client.get(url)
+            async with httpx.AsyncClient(
+                timeout=30,
+                follow_redirects=True,
+                headers=headers
+            ) as client:
+                response = await client.get(RSS_FEED)
+
+            texto = response.text.strip()
+            ct = response.headers.get("content-type", "")
+            print(f"📰 Status: {response.status_code} | CT: {ct[:40]} | UA: {headers['User-Agent'][:30]}")
 
             if response.status_code != 200:
-                print(f"📰 RSS2JSON erro: {response.status_code}")
                 continue
 
-            data = response.json()
-            status = data.get("status", "")
-            print(f"📰 RSS2JSON status: {status}")
-
-            if status != "ok":
-                print(f"📰 RSS2JSON falhou: {data.get('message','')}")
+            # Verifica se é XML
+            if "<rss" not in texto and "<?xml" not in texto:
+                print(f"📰 Não é XML, pulando...")
                 continue
 
-            items = data.get("items", [])
+            root = ET.fromstring(texto)
+            channel = root.find("channel")
+            if not channel:
+                continue
+
             noticias = []
-
-            for item in items:
-                titulo = item.get("title", "").strip()
-                link   = item.get("link",  "").strip()
-                data_pub = item.get("pubDate", "")[:10]
-                desc   = item.get("description", "")
-                categoria = item.get("categories", [""])[0] if item.get("categories") else ""
-
-                if not titulo or not link:
-                    continue
-
+            for item in channel.findall("item"):
+                titulo   = item.findtext("title", "").strip()
+                link     = item.findtext("link", "").strip()
+                data_pub = item.findtext("pubDate", "")[:16]
+                desc     = item.findtext("description", "")
+                cat_el   = item.find("category")
+                categoria = cat_el.text.strip() if cat_el is not None and cat_el.text else ""
                 desc_limpa = re.sub(r'<[^>]+>', '', desc)[:200].strip()
                 slug = link.strip("/").split("/")[-1] or link
 
-                noticias.append({
-                    "id":        slug,
-                    "titulo":    titulo,
-                    "link":      link,
-                    "data":      data_pub,
-                    "categoria": categoria,
-                    "resumo":    desc_limpa
-                })
+                if titulo and link:
+                    noticias.append({
+                        "id": slug, "titulo": titulo, "link": link,
+                        "data": data_pub, "categoria": categoria, "resumo": desc_limpa
+                    })
 
-            print(f"📰 ✅ {len(noticias)} notícias encontradas!")
+            print(f"📰 ✅ {len(noticias)} notícias!")
             return noticias
 
         except Exception as e:
             print(f"📰 ⚠️ Erro: {e}")
             continue
 
-    print("📰 ❌ Nenhuma fonte funcionou.")
-    return []
+    # Fallback: busca via scraping simples da página principal
+    print("📰 Tentando scraping da página principal...")
+    try:
+        from bs4 import BeautifulSoup
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+            "Referer": "https://google.com"
+        }) as client:
+            r = await client.get("https://publicidadeimobiliaria.com/")
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        noticias = []
+        vistos = set()
+
+        for tag in ["h2", "h3"]:
+            for el in soup.find_all(tag):
+                a = el.find("a", href=True)
+                if not a:
+                    continue
+                titulo = a.get_text(strip=True)
+                link   = a["href"]
+                if not titulo or "publicidadeimobiliaria.com" not in link:
+                    continue
+                slug = link.strip("/").split("/")[-1]
+                if slug in vistos or not slug:
+                    continue
+                vistos.add(slug)
+                noticias.append({
+                    "id": slug, "titulo": titulo, "link": link,
+                    "data": "", "categoria": "", "resumo": ""
+                })
+
+        print(f"📰 Scraping: {len(noticias)} notícias")
+        return noticias
+    except Exception as e:
+        print(f"📰 Scraping falhou: {e}")
+        return []
 
 
 def formatar_noticia(n, index, total):
@@ -88,23 +136,20 @@ async def disparar_noticias(bot, periodo_label=""):
     global _inicializado, _ids_enviados
 
     noticias = await buscar_noticias()
-
     if not noticias:
         return
 
     if not _inicializado:
         _ids_enviados = {n["id"] for n in noticias}
         _inicializado = True
-        print(f"📰 Estado inicial: {len(_ids_enviados)} notícias salvas.")
+        print(f"📰 Estado inicial: {len(_ids_enviados)} notícias.")
         return
 
     novas = [n for n in noticias if n["id"] not in _ids_enviados]
-
     if not novas:
-        print("📰 Sem notícias novas.")
+        print("📰 Sem novidades.")
         return
 
-    print(f"📰 {len(novas)} nova(s)!")
     for n in novas:
         _ids_enviados.add(n["id"])
 
@@ -123,4 +168,4 @@ async def disparar_noticias(bot, periodo_label=""):
                     disable_web_page_preview=True
                 )
         except Exception as e:
-            print(f"⚠️ Erro envio {chat_id}: {e}")
+            print(f"⚠️ {chat_id}: {e}")
