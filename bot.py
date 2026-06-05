@@ -404,12 +404,16 @@ async def cmd_testenoticias(update, context):
             return
         from noticias import IMAGEM_NOTICIAS
         total = len(noticias)
-        await context.bot.send_photo(
-            chat_id=update.effective_chat.id,
-            photo=IMAGEM_NOTICIAS,
-            caption=f"🏠 *Notícias do Mercado Imobiliário*\nTeste — {total} encontrada(s)",
-            parse_mode="Markdown"
-        )
+        caption = f"Noticias do Mercado Imobiliario - Teste - {total} encontrada(s)"
+        try:
+            with open(IMAGEM_NOTICIAS, "rb") as img:
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=img,
+                    caption=caption
+                )
+        except Exception:
+            await update.message.reply_text(caption)
         for i, n in enumerate(noticias[:3], 1):
             await update.message.reply_text(
                 formatar_noticia(n, i, total),
