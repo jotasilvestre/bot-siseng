@@ -3,6 +3,7 @@
 # ============================================================
 
 import asyncio
+from datetime import datetime
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -26,6 +27,7 @@ from consultas import (
 )
 from monitor import verificar_atualizacoes
 from claude_ai import interpretar_mensagem
+from noticias import disparar_noticias
 
 
 # ─── CONTROLE DE ACESSO ─────────────────────────────────────
@@ -42,7 +44,13 @@ async def acesso_negado(update: Update):
 
 # ─── TEMPORIZADOR asyncio ───────────────────────────────────
 
+def fuso_brasilia():
+    """Retorna hora atual no fuso de Brasília (UTC-4)."""
+    from datetime import timezone, timedelta
+    return datetime.now(timezone(timedelta(hours=-4)))
+
 async def loop_monitor(bot):
+    """Monitor de planilha — roda a cada 5 minutos."""
     await asyncio.sleep(10)
     while True:
         try:
@@ -50,6 +58,40 @@ async def loop_monitor(bot):
         except Exception as e:
             print(f"⚠️ Erro no monitor: {e}")
         await asyncio.sleep(300)
+
+async def loop_noticias(bot):
+    """Monitor de notícias — dispara às 9h, 12h e 19h (Brasília)."""
+    from datetime import datetime, timezone, timedelta
+
+    HORARIOS = [9, 12, 19]
+    ultimo_disparo = None
+
+    # Inicializa o estado sem enviar
+    await disparar_noticias(bot, "Inicializando...")
+
+    while True:
+        await asyncio.sleep(60)  # verifica a cada 1 minuto
+
+        agora = datetime.now(timezone(timedelta(hours=-4)))
+        hora_atual = agora.hour
+        data_atual = agora.date()
+
+        # Verifica se é um dos horários de disparo e ainda não disparou hoje nesse horário
+        chave = (data_atual, hora_atual)
+
+        if hora_atual in HORARIOS and chave != ultimo_disparo:
+            periodo_label = {
+                9:  "Notícias da manhã (desde 19h de ontem)",
+                12: "Notícias do meio-dia (desde 9h)",
+                19: "Notícias da tarde (desde 12h)"
+            }.get(hora_atual, "Notícias recentes")
+
+            print(f"📰 Disparando notícias das {hora_atual}h...")
+            try:
+                await disparar_noticias(bot, periodo_label)
+                ultimo_disparo = chave
+            except Exception as e:
+                print(f"⚠️ Erro no disparo de notícias: {e}")
 
 
 # ─── EXECUTOR DE COMANDOS (chamado pela IA) ─────────────────
@@ -379,7 +421,10 @@ async def main():
     print(f"📡 Notificações → chat: {CHAT_ID_NOTIFICACOES}")
 
     try:
-        await loop_monitor(app.bot)
+        await asyncio.gather(
+            loop_monitor(app.bot),
+            loop_noticias(app.bot)
+        )
     finally:
         await app.updater.stop()
         await app.stop()
