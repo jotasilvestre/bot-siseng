@@ -132,7 +132,7 @@ def formatar_noticia(n, index, total):
     )
 
 
-IMAGEM_NOTICIAS = "https://drive.google.com/uc?export=view&id=1K1dkydroXSLFxLuXD8ErwQ-BcN2BLvfe"
+IMAGEM_NOTICIAS = "https://raw.githubusercontent.com/jotasilvestre/bot-siseng/main/banner-noticias.jpg"
 
 async def disparar_noticias(bot, periodo_label=""):
     global _inicializado, _ids_enviados
