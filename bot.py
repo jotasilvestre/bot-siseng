@@ -439,7 +439,10 @@ async def main():
 
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
+
+    # Limpa webhook e conflitos pendentes antes de iniciar polling
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    await app.updater.start_polling(drop_pending_updates=True)
 
     print("✅ Bot rodando com Gemini IA + monitor ativo!")
     print(f"📡 Notificações → chat: {CHAT_ID_NOTIFICACOES}")
